@@ -1,7 +1,6 @@
 import "./Interface8/IERC20.sol";
 import "./Interface8/IOpensaleFinanceLottery.sol";
 import "./Interface8/IRandomNumberGenerator.sol";
-import "./Interface8/LinkTokenInterface.sol";
 import "./Lib8/Ownable.sol";
 import "./Lib8/ReentrancyGuard.sol";
 import "./Lib8/SafeERC20.sol";
@@ -36,7 +35,7 @@ contract RandomNumberGenerator is VRFConsumerBase, IRandomNumberGenerator, Ownab
      * @param _seed: seed provided by the OpensaleFinance lottery
      */
     function getRandomNumber(uint256 _seed) external override {
-        require(msg.sender == opensaleFinanceLottery, "Only OpensaleFinanceLottery");
+        require(msg.sender == opensaleFinanceLottery, "Only OpensaleFinanceLottery"); 
         require(keyHash != bytes32(0), "Must have valid key hash");
         require(LINK.balanceOf(address(this)) >= fee, "Not enough LINK tokens");
 

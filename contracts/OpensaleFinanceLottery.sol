@@ -247,7 +247,7 @@ contract OpensaleFinanceLottery is ReentrancyGuard, IOpensaleFinanceLottery, Own
      * @param _lotteryId: lottery id
      * @dev Callable by operator
      */
-    function closeLottery(uint256 _lotteryId) external override onlyOperator nonReentrant {
+    function closeLottery(uint256 _lotteryId) external override onlyOperator nonReentrant { 
         require(_lotteries[_lotteryId].status == Status.Open, "Lottery not open");
         require(block.timestamp > _lotteries[_lotteryId].endTime, "Lottery not over");
         _lotteries[_lotteryId].firstTicketIdNextLottery = currentTicketId;

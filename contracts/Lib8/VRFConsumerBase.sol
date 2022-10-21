@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 import "./VRFRequestIDBase.sol";
+import "../Interface8/LinkTokenInterface.sol";
 
 pragma solidity ^0.8.0;
 

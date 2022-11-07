@@ -172,7 +172,7 @@ contract Presale is Ownable, ReentrancyGuard {
     function claim() external nonReentrant {
         require (contributes[msg.sender] > 0, "You have no contributes");
         require (finished, "The presale is still active");
-        require (collected >= presaleData.hardcap, "The presale failed");
+        require (collected >= presaleData.softcap, "The presale failed");
 
         uint amount = contributes[msg.sender] * presaleData.presale_rate / (10 ** (18 - tokenDecimals));
 
@@ -200,7 +200,7 @@ contract Presale is Ownable, ReentrancyGuard {
     function withdraw() external nonReentrant {
         require (contributes[msg.sender] > 0, "You have not contributed");
         require (block.timestamp >= presaleData.end_time, "The presale is still active");
-        require (collected < presaleData.hardcap, "You cannot withdraw now. Claim your tokens instead");
+        require (collected < presaleData.softcap, "You cannot withdraw now. Claim your tokens instead");
 
         payable(msg.sender).transfer(contributes[msg.sender]);
         contributes[msg.sender] = 0;
@@ -216,16 +216,17 @@ contract Presale is Ownable, ReentrancyGuard {
     }
 
     function finalize() external onlyCreator {
-        require (collected >= presaleData.hardcap, "Presale failed or not ended yet");
+        require (collected >= presaleData.softcap, "Presale failed or not ended yet");
 
-        uint bnbAmountToLock = presaleData.hardcap * presaleData.pcs_liquidity / 100;
-        lockLP(bnbAmountToLock);
-        
         uint feeBnb = collected * presaleData.feeBnbPortion / 10000;
+        uint bnbAmountToLock = (collected - feeBnb) * presaleData.pcs_liquidity / 100;
+        lockLP(bnbAmountToLock);
+
         payable(presaleData.feeAddress).transfer(feeBnb);
-        payable(presaleData.creator).transfer(collected - bnbAmountToLock - feeBnb);
+        payable(presaleData.creator).transfer(collected - bnbAmountToLock - feeBnb);        
         
-        IERC20(presaleData.token).transferFrom(address(this), presaleData.feeAddress, collected * presaleData.presale_rate * presaleData.feeTokenPortion / 10**(22-tokenDecimals) );
+        if (presaleData.feeTokenPortion > 0)
+            IERC20(presaleData.token).transferFrom(address(this), presaleData.feeAddress, collected * presaleData.presale_rate * presaleData.feeTokenPortion / 10**(22-tokenDecimals) );
 
         finished = true;
         finishedTime = block.timestamp;
@@ -246,17 +247,24 @@ contract Presale is Ownable, ReentrancyGuard {
         );
     }
 
+    function unlockLP() external onlyCreator {
+        require (block.timestamp >= presaleData.unlock_time, "you need to wait by unlock time");
+        address lpToken = IPancakeFactory(IPancakeRouter02(pcsRouter).factory()).getPair(presaleData.token, IPancakeRouter02(pcsRouter).WETH());
+        uint256 amount = IERC20(lpToken).balanceOf(address(this));
+        IERC20(lpToken).transfer(presaleData.creator, amount);
+    }
+
     function getStatus() view external returns(uint) {
         if (collected >= presaleData.hardcap) return 3;
         /** if (block.timestamp > ) ; */
         return 1;
     }
     
-    function getClaimAmount() view external returns(uint) {
-        if(!finished || contributes[msg.sender] < 1 || collected < presaleData.hardcap) return 0;
-        uint amount = contributes[msg.sender] * presaleData.presale_rate / (10 ** (18 - tokenDecimals));
+    function getClaimAmount(address user) view external returns(uint) {
+        if(contributes[user] < 1 || collected < presaleData.softcap) return 0;
+        uint amount = contributes[user] * presaleData.presale_rate / (10 ** (18 - tokenDecimals));
 
-        if (amount <= userClaims[msg.sender]) return 0;
+        if (amount <= userClaims[user]) return 0;
 
         if (presaleData.presaleVesting) {
             uint claimable = amount * presaleData.presaleVestingData.firstRelease / 100 + amount * (block.timestamp - finishedTime) / presaleData.presaleVestingData.cycle * presaleData.presaleVestingData.cycleRelease / 100;
@@ -265,9 +273,9 @@ contract Presale is Ownable, ReentrancyGuard {
                 claimable = amount;
             }
 
-            if (claimable <= userClaims[msg.sender]) return 0;
+            if (claimable <= userClaims[user]) return 0;
 
-            return claimable - userClaims[msg.sender];
+            return claimable - userClaims[user];
         } else {
             return amount;
         }        
@@ -336,12 +344,12 @@ contract Presale is Ownable, ReentrancyGuard {
         return EnumerableSet.length(_contributors);
     }
 
-    function getContributor(uint256 _index) public view onlyCreator returns (address){
+    function getContributor(uint256 _index) public view returns (address){
         require(_index <= getContributorLength() - 1, "index out of bounds");
         return EnumerableSet.at(_contributors, _index);
     }
 
-    function getContributorArr() public view onlyCreator returns (Contributes[] memory) {
+    function getContributorArr() public view returns (Contributes[] memory) {
         Contributes[] memory contributeArr = new Contributes[](getContributorLength());
         for (uint i = 0; i < getContributorLength(); i+=1) {
             contributeArr[i] = 
@@ -373,7 +381,7 @@ contract Presale is Ownable, ReentrancyGuard {
         return EnumerableSet.length(_whitelistedUsers);
     }
 
-    function getWhitelistedUser(uint256 _index) public view onlyCreator returns (address){
+    function getWhitelistedUser(uint256 _index) public view returns (address){
         require(_index <= getWhitelistedUsersLength() - 1, "index out of bounds");
         return EnumerableSet.at(_whitelistedUsers, _index);
     }

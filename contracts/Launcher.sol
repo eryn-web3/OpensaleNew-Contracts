@@ -12,11 +12,9 @@ contract Launcher is Ownable {
     mapping(address => address) public tokenToPresale;
     mapping(address => bool) public isPresale;
 
-    uint public feeAmount = 75e16;
-    uint public tokenFee = 150;
-    uint public bnbFee = 150;
+    uint public feeAmount = 75e15; // TODO
     address public feeTo;
-    uint public minPresaleTime = 3600;
+    uint public minPresaleTime = 60; // TODO
     uint public maxPresaleTime = 3600 * 24 * 30;
 
     address[] public routers;
@@ -64,10 +62,11 @@ contract Launcher is Ownable {
     function _calcTokenAmount(PresaleData memory presaleData) view internal returns(uint) {
         uint tokenDecimals = IERC20Metadata(presaleData.token).decimals();
         
+        uint feeBnbAmount = presaleData.hardcap * presaleData.feeBnbPortion / 10000;
         uint presaleTokenAmount = (10**tokenDecimals) * presaleData.hardcap * presaleData.presale_rate / 1e18;
-        uint feeTokenAmount = presaleTokenAmount * tokenFee / 10000;
+        uint feeTokenAmount = presaleTokenAmount * presaleData.feeTokenPortion / 10000;
         
-        uint lockTokenAmount = presaleData.hardcap * presaleData.pcs_liquidity * (10**tokenDecimals) * presaleData.pcs_rate / 1e20;
+        uint lockTokenAmount = (presaleData.hardcap - feeBnbAmount) * presaleData.pcs_liquidity * (10**tokenDecimals) * presaleData.pcs_rate / 1e20;
 
         uint teamVestingAmount = 0;
         if (presaleData.teamVesting) {
@@ -77,10 +76,8 @@ contract Launcher is Ownable {
         return presaleTokenAmount + feeTokenAmount + lockTokenAmount + teamVestingAmount;
     }
 
-    function setFee(address _feeTo, uint _feeAmount, uint _tokenFee, uint _bnbFee) external onlyOwner {
+    function setFee(address _feeTo, uint _feeAmount) external onlyOwner {
         feeTo = _feeTo;
-        tokenFee = _tokenFee;
-        bnbFee = _bnbFee;
         feeAmount = _feeAmount;
     }
     

@@ -44,6 +44,7 @@ struct TeamVesting {
 }
 
 struct PresaleData {
+    bool isPrivateSale;
     address token;
     uint presale_rate;
     uint softcap;
@@ -55,6 +56,7 @@ struct PresaleData {
     uint start_time;
     uint end_time;
     uint unlock_time;
+    string title;
     string logo_link;
     string description;
     string metadata;
@@ -69,6 +71,14 @@ struct PresaleData {
     PresaleVesting presaleVestingData;
     bool teamVesting;
     TeamVesting teamVestingData;
+    uint collected;
+    uint finishedTime;
+    bool finished;
+    uint cancelTime;
+    bool canceled;
+    bool isKyc;
+    bool isAudit;
+    uint contributors;
 }
 
 struct Contributes {
@@ -87,9 +97,6 @@ contract Presale is Ownable, ReentrancyGuard {
     // user claims
     mapping(address => uint) private userClaims;
 
-    // collected BNB amount
-    uint public collected = 0;
-
     // presale info
     PresaleData presaleData;
     uint tokenDecimals;
@@ -98,19 +105,16 @@ contract Presale is Ownable, ReentrancyGuard {
     // claimed amount of team
     uint claimedTeamVesting = 0;
 
-    // presale finish info
-    uint public finishedTime = 0;
-    bool public finished = false;
+    // for private sale
+    uint claimedFundAmount = 0;
 
-    // presale cancel info
-    uint public cancelTime = 0;
-    bool public canceled = false;
-    
-
-    constructor(PresaleData memory _presale, address _router) {
+    constructor(PresaleData memory _presale, address _router) {        
         presaleData = _presale;
-        pcsRouter = _router;        
-        tokenDecimals = IERC20Metadata(presaleData.token).decimals();
+        pcsRouter = _router;   
+
+        if (_presale.isPrivateSale == false){
+            tokenDecimals = IERC20Metadata(presaleData.token).decimals();
+        }        
     }
 
     modifier onlyCreator() {
@@ -145,7 +149,7 @@ contract Presale is Ownable, ReentrancyGuard {
             _addContributor(user);
         }
         
-        uint left = presaleData.hardcap - collected;
+        uint left = presaleData.hardcap - presaleData.collected;
 
         uint contributeAmount = amount;
         uint returnAmount = 0;
@@ -166,20 +170,20 @@ contract Presale is Ownable, ReentrancyGuard {
         }
         
         contributes[user] += contributeAmount;
-        collected += contributeAmount;
+        presaleData.collected += contributeAmount;
     }
 
     function claim() external nonReentrant {
         require (contributes[msg.sender] > 0, "You have no contributes");
-        require (finished, "The presale is still active");
-        require (collected >= presaleData.softcap, "The presale failed");
+        require (presaleData.finished, "The presale is still active");
+        require (presaleData.collected >= presaleData.softcap, "The presale failed");
 
         uint amount = contributes[msg.sender] * presaleData.presale_rate / (10 ** (18 - tokenDecimals));
 
         require (amount > userClaims[msg.sender], "You claimed all");
 
         if (presaleData.presaleVesting) {
-            uint claimable = amount * presaleData.presaleVestingData.firstRelease / 100 + amount * (block.timestamp - finishedTime) / presaleData.presaleVestingData.cycle * presaleData.presaleVestingData.cycleRelease / 100;
+            uint claimable = amount * presaleData.presaleVestingData.firstRelease / 100 + amount * (block.timestamp - presaleData.finishedTime) / presaleData.presaleVestingData.cycle * presaleData.presaleVestingData.cycleRelease / 100;
 
             if (claimable > amount) {
                 claimable = amount;
@@ -197,10 +201,30 @@ contract Presale is Ownable, ReentrancyGuard {
         }
     }
 
+    function claimFund() external nonReentrant onlyCreator{
+        require (presaleData.finished, "The private sale is still active");
+        require (presaleData.collected >= presaleData.softcap, "The private sale failed");
+
+        require (presaleData.collected > claimedFundAmount, "You claimed all");
+
+        uint claimable = presaleData.collected * presaleData.presaleVestingData.firstRelease / 100 + 
+            presaleData.collected * (block.timestamp - presaleData.finishedTime) / presaleData.presaleVestingData.cycle * presaleData.presaleVestingData.cycleRelease / 100;
+
+        if (claimable > presaleData.collected) {
+            claimable = presaleData.collected;
+        }
+
+        require (claimable > claimedFundAmount, "You cannot claim yet");
+
+        payable(msg.sender).transfer(claimable - claimedFundAmount);
+
+        claimedFundAmount = claimable;
+    }
+
     function withdraw() external nonReentrant {
         require (contributes[msg.sender] > 0, "You have not contributed");
         require (block.timestamp >= presaleData.end_time, "The presale is still active");
-        require (collected < presaleData.softcap, "You cannot withdraw now. Claim your tokens instead");
+        require (presaleData.collected < presaleData.softcap, "You cannot withdraw now. Claim your tokens instead");
 
         payable(msg.sender).transfer(contributes[msg.sender]);
         contributes[msg.sender] = 0;
@@ -216,20 +240,29 @@ contract Presale is Ownable, ReentrancyGuard {
     }
 
     function finalize() external onlyCreator {
-        require (collected >= presaleData.softcap, "Presale failed or not ended yet");
+        require (presaleData.collected >= presaleData.softcap, "Presale failed or not ended yet");
 
-        uint feeBnb = collected * presaleData.feeBnbPortion / 10000;
-        uint bnbAmountToLock = (collected - feeBnb) * presaleData.pcs_liquidity / 100;
-        lockLP(bnbAmountToLock);
+        uint feeBnb = presaleData.collected * presaleData.feeBnbPortion / 10000;
 
-        payable(presaleData.feeAddress).transfer(feeBnb);
-        payable(presaleData.creator).transfer(collected - bnbAmountToLock - feeBnb);        
+        if (presaleData.isPrivateSale) {
+            uint claimable = presaleData.collected * presaleData.presaleVestingData.firstRelease / 100;
+
+            payable(presaleData.feeAddress).transfer(feeBnb);
+            payable(presaleData.creator).transfer(claimable - feeBnb);
+            claimedFundAmount = claimable;
+        } else {
+            uint bnbAmountToLock = (presaleData.collected - feeBnb) * presaleData.pcs_liquidity / 100;
+            lockLP(bnbAmountToLock);
+
+            payable(presaleData.feeAddress).transfer(feeBnb);
+            payable(presaleData.creator).transfer(presaleData.collected - bnbAmountToLock - feeBnb);        
+            
+            if (presaleData.feeTokenPortion > 0)
+                IERC20(presaleData.token).transferFrom(address(this), presaleData.feeAddress, presaleData.collected * presaleData.presale_rate * presaleData.feeTokenPortion / 10**(22-tokenDecimals) );
+        }
         
-        if (presaleData.feeTokenPortion > 0)
-            IERC20(presaleData.token).transferFrom(address(this), presaleData.feeAddress, collected * presaleData.presale_rate * presaleData.feeTokenPortion / 10**(22-tokenDecimals) );
-
-        finished = true;
-        finishedTime = block.timestamp;
+        presaleData.finished = true;
+        presaleData.finishedTime = block.timestamp;
     }
 
     function lockLP(uint bnbAmount) internal {
@@ -255,19 +288,19 @@ contract Presale is Ownable, ReentrancyGuard {
     }
 
     function getStatus() view external returns(uint) {
-        if (collected >= presaleData.hardcap) return 3;
+        if (presaleData.collected >= presaleData.hardcap) return 3;
         /** if (block.timestamp > ) ; */
         return 1;
     }
     
     function getClaimAmount(address user) view external returns(uint) {
-        if(contributes[user] < 1 || collected < presaleData.softcap) return 0;
+        if(contributes[user] < 1 || presaleData.collected < presaleData.softcap) return 0;
         uint amount = contributes[user] * presaleData.presale_rate / (10 ** (18 - tokenDecimals));
 
         if (amount <= userClaims[user]) return 0;
 
         if (presaleData.presaleVesting) {
-            uint claimable = amount * presaleData.presaleVestingData.firstRelease / 100 + amount * (block.timestamp - finishedTime) / presaleData.presaleVestingData.cycle * presaleData.presaleVestingData.cycleRelease / 100;
+            uint claimable = amount * presaleData.presaleVestingData.firstRelease / 100 + amount * (block.timestamp - presaleData.finishedTime) / presaleData.presaleVestingData.cycle * presaleData.presaleVestingData.cycleRelease / 100;
 
             if (claimable > amount) {
                 claimable = amount;
@@ -281,6 +314,22 @@ contract Presale is Ownable, ReentrancyGuard {
         }        
     }
     
+    function getPrivateSaleClaimAmount() view external returns(uint) {
+        if (presaleData.collected < presaleData.softcap) return 0;
+        if (presaleData.collected <= claimedFundAmount) return 0;
+
+        uint claimable = presaleData.collected * presaleData.presaleVestingData.firstRelease / 100 + 
+            presaleData.collected * (block.timestamp - presaleData.finishedTime) / presaleData.presaleVestingData.cycle * presaleData.presaleVestingData.cycleRelease / 100;
+
+        if (claimable > presaleData.collected) {
+            claimable = presaleData.collected;
+        }
+
+        if (claimable <= claimedFundAmount) return 0;
+
+        return claimable - claimedFundAmount;       
+    }
+
     function getPresaleData() view public returns(PresaleData memory) {
         return presaleData;
     }
@@ -301,10 +350,10 @@ contract Presale is Ownable, ReentrancyGuard {
     }
 
     function claimTeamVesting(address to) external onlyCreator {
-        require (finished, "The presale is not finished");
+        require (presaleData.finished, "The presale is not finished");
         require (claimedTeamVesting < presaleData.teamVestingData.total, "All claimed");
 
-        uint firstReleaseTime = finishedTime + presaleData.teamVestingData.firstReleaseDelay;
+        uint firstReleaseTime = presaleData.finishedTime + presaleData.teamVestingData.firstReleaseDelay;
 
         require (block.timestamp >= firstReleaseTime, "You can't claim yet");
 
@@ -322,21 +371,31 @@ contract Presale is Ownable, ReentrancyGuard {
     }
 
     function cancel() external onlyCreator {
-        require (canceled == false, "Presale failed or not ended yet");
+        require (presaleData.canceled == false, "Presale failed or not ended yet");
 
-        canceled = true;
-        cancelTime = block.timestamp;
+        presaleData.canceled = true;
+        presaleData.cancelTime = block.timestamp;
+    }
+
+    function updateKyc(bool _isKyc) external onlyOwner {
+        presaleData.isKyc = _isKyc;
+    }
+
+    function updateAudit(bool _isAudit) external onlyOwner {
+        presaleData.isAudit = _isAudit;
     }
 
 
     // contributors functions
     function _addContributor(address _addUser) internal returns (bool) {
         require(_addUser != address(0), "_addUser is the zero address");
+        presaleData.contributors++;
         return EnumerableSet.add(_contributors, _addUser);
     }
 
     function _delContributor(address _delUser) internal returns (bool) {
         require(_delUser != address(0), "_delUser is the zero address");
+        presaleData.contributors--;
         return EnumerableSet.remove(_contributors, _delUser);
     }
 

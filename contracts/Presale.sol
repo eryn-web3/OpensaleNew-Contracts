@@ -247,14 +247,18 @@ contract Presale is Ownable, ReentrancyGuard {
         if (presaleData.isPrivateSale) {
             uint claimable = presaleData.collected * presaleData.presaleVestingData.firstRelease / 100;
 
-            payable(presaleData.feeAddress).transfer(feeBnb);
+            if (feeBnb > 0) {
+                payable(presaleData.feeAddress).transfer(feeBnb);
+            }
             payable(presaleData.creator).transfer(claimable - feeBnb);
             claimedFundAmount = claimable;
         } else {
             uint bnbAmountToLock = (presaleData.collected - feeBnb) * presaleData.pcs_liquidity / 100;
             lockLP(bnbAmountToLock);
 
-            payable(presaleData.feeAddress).transfer(feeBnb);
+            if (feeBnb > 0) {
+                payable(presaleData.feeAddress).transfer(feeBnb);
+            }
             payable(presaleData.creator).transfer(presaleData.collected - bnbAmountToLock - feeBnb);        
             
             if (presaleData.feeTokenPortion > 0)
@@ -284,7 +288,9 @@ contract Presale is Ownable, ReentrancyGuard {
         require (block.timestamp >= presaleData.unlock_time, "you need to wait by unlock time");
         address lpToken = IPancakeFactory(IPancakeRouter02(pcsRouter).factory()).getPair(presaleData.token, IPancakeRouter02(pcsRouter).WETH());
         uint256 amount = IERC20(lpToken).balanceOf(address(this));
-        IERC20(lpToken).transfer(presaleData.creator, amount);
+        if (amount > 0) {
+            IERC20(lpToken).transfer(presaleData.creator, amount);
+        }        
     }
 
     function getStatus() view external returns(uint) {
@@ -367,7 +373,10 @@ contract Presale is Ownable, ReentrancyGuard {
 
         claimedTeamVesting += claimableAmount;
 
-        IERC20(presaleData.token).transfer(payable(to), claimableAmount);
+        if (claimableAmount > 0) {
+            IERC20(presaleData.token).transfer(payable(to), claimableAmount);
+        } 
+        
     }
 
     function cancel() external onlyCreator {
